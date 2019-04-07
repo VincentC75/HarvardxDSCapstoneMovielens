@@ -1,0 +1,105 @@
+---
+title: "Movie Recommendation model for the Movielens dataset"
+author: "Vincent"
+date: "April 7th 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This code is an extract from the Movielens_Report.Rmd file. It contains only the required code to compute the RMSE from the final model selected.
+
+### Loading useful libraries
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(caret)
+```
+
+### Downloading the data if required
+
+```{r, cache = TRUE}
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- read.table(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                      col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+```
+
+### Formatting data
+```{r}
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+```
+
+### Splitting the data in a training and a validation test
+
+```{r, message=FALSE}
+# Validation set will be 10% of MovieLens data
+
+set.seed(1)
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+
+```
+
+### Prediction evaluation with RMSE
+
+```{r}
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+### final model with regularized movie and user bias
+
+We use the lambda parameter that was previously optimized by a 10-fold cross validation on the edx training set.
+
+```{r}
+l <- 4.925
+
+  mu <- mean(edx$rating)
+  
+  b_i <- edx %>% 
+    group_by(movieId) %>%
+    summarize(b_i = sum(rating - mu)/(n()+l))
+  
+  b_u <- edx %>% 
+    left_join(b_i, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - b_i - mu)/(n()+l))
+
+  predicted_ratings <- 
+    validation %>% 
+    left_join(b_i, by = "movieId") %>%
+    left_join(b_u, by = "userId") %>%
+    mutate(pred = mu + b_i + b_u) %>%
+    pull(pred)
+  
+    final_RMSE <- RMSE(predicted_ratings, validation$rating)
+    final_RMSE
+```
+
+The RMSE for our best model is ***`r final_RMSE`***.
